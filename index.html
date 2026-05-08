@@ -12,24 +12,24 @@
     body {
       margin: 0;
       padding: 0;
-      background: #f4f7f8;
+      background: #f4f6f8;
       font-family: Arial, sans-serif;
       color: #222;
     }
 
     .container {
-      max-width: 700px;
+      max-width: 750px;
       margin: 40px auto;
       background: white;
       padding: 30px;
       border-radius: 16px;
-      box-shadow: 0 4px 14px rgba(0,0,0,0.1);
+      box-shadow: 0 4px 15px rgba(0,0,0,0.1);
     }
 
     h1 {
       text-align: center;
       color: #2e7d32;
-      margin-bottom: 30px;
+      margin-bottom: 25px;
     }
 
     .status-box {
@@ -43,7 +43,7 @@
 
     .upload-section {
       text-align: center;
-      margin-bottom: 25px;
+      margin-bottom: 20px;
     }
 
     input[type="file"] {
@@ -56,26 +56,26 @@
       max-height: 400px;
       object-fit: contain;
       border-radius: 12px;
-      margin-top: 20px;
       border: 2px solid #ddd;
+      margin-top: 20px;
     }
 
     .result-box {
       margin-top: 25px;
       padding: 20px;
-      background: #f9f9f9;
+      background: #f7f7f7;
       border-radius: 12px;
       font-size: 18px;
-      line-height: 1.6;
-    }
-
-    .warning {
-      color: #d84315;
-      font-weight: bold;
+      line-height: 1.7;
     }
 
     .success {
       color: #2e7d32;
+      font-weight: bold;
+    }
+
+    .warning {
+      color: #d84315;
       font-weight: bold;
     }
   </style>
@@ -84,8 +84,8 @@
 
   <div class="container">
 
-    <!-- ÄNDRA TILL DITT NAMN OCH KLASS -->
-    <h1>Förnamn Efternamn, TE23</h1>
+    <!-- BYT TILL DITT NAMN -->
+    <h1>Ditt Namn, TE23</h1>
 
     <div class="status-box" id="status">
       Laddar modell...
@@ -95,10 +95,10 @@
       <input type="file" id="imageInput" accept="image/*">
     </div>
 
-    <img id="previewImage" />
+    <img id="previewImage">
 
     <div class="result-box" id="result">
-      Ladda upp en blom-bild för att få en klassificering.
+      Ladda upp en blom-bild för att börja.
     </div>
 
   </div>
@@ -106,14 +106,13 @@
   <script>
     let model;
 
-    // Lista över blomklasser
-    // ÄNDRA så att den matchar träningsmodellen
+    // ÄNDRA ordningen så den matchar modellen
     const classNames = [
+      "Lavendel",
       "Maskros",
       "Ros",
-      "Tulpan",
       "Solros",
-      "Lavendel"
+      "Tulpan"
     ];
 
     const statusBox = document.getElementById("status");
@@ -121,12 +120,15 @@
     const previewImage = document.getElementById("previewImage");
     const resultBox = document.getElementById("result");
 
+    // =========================
     // LADDA MODELL
+    // =========================
     async function loadModel() {
+
       try {
+
         statusBox.textContent = "Laddar modell...";
 
-        // Byt till din GitHub raw-länk
         model = await tf.loadLayersModel(
           "tfjs_model/model.json"
         );
@@ -134,7 +136,10 @@
         statusBox.innerHTML =
           "<span class='success'>Modellen är klar!</span>";
 
+        console.log("Modellen laddad!");
+
       } catch (error) {
+
         console.error(error);
 
         statusBox.innerHTML =
@@ -144,49 +149,59 @@
 
     loadModel();
 
-    // När användaren väljer en bild
-    imageInput.addEventListener("change", async (event) => {
+    // =========================
+    // LADDA BILD
+    // =========================
+    imageInput.addEventListener("change", (event) => {
 
       const file = event.target.files[0];
 
       if (!file) return;
 
-      // Visa bild
       const imageURL = URL.createObjectURL(file);
 
       previewImage.src = imageURL;
       previewImage.style.display = "block";
 
-      // Vänta tills bilden laddats
       previewImage.onload = async () => {
-        await predictImage(previewImage);
+        await classifyImage(previewImage);
       };
     });
 
-    // Förbehandla bild
+    // =========================
+    // FÖRBEHANDLA BILD
+    // =========================
     function preprocessImage(image) {
 
       return tf.tidy(() => {
 
-        const tensor = tf.browser
+        return tf.browser
           .fromPixels(image)
-          .resizeNearestNeighbor([224, 224])
+          .resizeBilinear([224, 224])
           .toFloat()
-          .div(255)
-          .expandDims();
-
-        return tensor;
+          .div(255.0)
+          .expandDims(0);
       });
     }
 
-    // Kör modellen
-    async function predictImage(image) {
+    // =========================
+    // SOFTMAX-FUNKTION
+    // =========================
+    function softmax(arr) {
 
-      if (!model) {
-        resultBox.innerHTML =
-          "<span class='warning'>Modellen är inte laddad ännu.</span>";
-        return;
-      }
+      const max = Math.max(...arr);
+
+      const exps = arr.map(x => Math.exp(x - max));
+
+      const sum = exps.reduce((a, b) => a + b);
+
+      return exps.map(v => v / sum);
+    }
+
+    // =========================
+    // KLASSIFICERA BILD
+    // =========================
+    async function classifyImage(image) {
 
       try {
 
@@ -194,27 +209,46 @@
 
         const tensor = preprocessImage(image);
 
+        // Modell-prediktion
         const prediction = model.predict(tensor);
 
-        const data = await prediction.data();
+        // Hämta rådata
+        const rawData = await prediction.data();
+
+        console.log("Rå modell-output:", rawData);
+
+        // =========================
+        // VIKTIG FIX:
+        // Om modellen INTE använder softmax
+        // får man värden över 1.
+        // Därför normaliserar vi med softmax här.
+        // =========================
+        const probabilities = softmax(Array.from(rawData));
+
+        console.log("Softmax:", probabilities);
 
         // Hitta högsta sannolikhet
         let highestProbability = 0;
         let highestIndex = 0;
 
-        for (let i = 0; i < data.length; i++) {
+        for (let i = 0; i < probabilities.length; i++) {
 
-          if (data[i] > highestProbability) {
-            highestProbability = data[i];
+          if (probabilities[i] > highestProbability) {
+
+            highestProbability = probabilities[i];
             highestIndex = i;
           }
         }
 
-        const flowerName = classNames[highestIndex];
-        const probabilityPercent =
+        const flowerName =
+          classNames[highestIndex] || "Okänd blomma";
+
+        const percent =
           (highestProbability * 100).toFixed(2);
 
-        // Osäkerhetslogik
+        // =========================
+        // OSÄKERHETSLOGIK
+        // =========================
         let confidenceMessage = "";
 
         if (highestProbability < 0.5) {
@@ -228,13 +262,16 @@
             "<div class='warning'>Osäkert resultat</div>";
         }
 
-        // Visa resultat
+        // =========================
+        // VISA RESULTAT
+        // =========================
         resultBox.innerHTML = `
           <strong>Blomart:</strong> ${flowerName}<br>
-          <strong>Sannolikhet:</strong> ${probabilityPercent}%<br><br>
+          <strong>Sannolikhet:</strong> ${percent}%<br><br>
           ${confidenceMessage}
         `;
 
+        // Rensa minne
         tensor.dispose();
         prediction.dispose();
 
