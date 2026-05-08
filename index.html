@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Blomklassificering</title>
+
+  <!-- TensorFlow.js -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      background: #f4f7f8;
+      font-family: Arial, sans-serif;
+      color: #222;
+    }
+
+    .container {
+      max-width: 700px;
+      margin: 40px auto;
+      background: white;
+      padding: 30px;
+      border-radius: 16px;
+      box-shadow: 0 4px 14px rgba(0,0,0,0.1);
+    }
+
+    h1 {
+      text-align: center;
+      color: #2e7d32;
+      margin-bottom: 30px;
+    }
+
+    .status-box {
+      background: #eef7ee;
+      border-left: 5px solid #43a047;
+      padding: 15px;
+      border-radius: 10px;
+      margin-bottom: 25px;
+      font-weight: bold;
+    }
+
+    .upload-section {
+      text-align: center;
+      margin-bottom: 25px;
+    }
+
+    input[type="file"] {
+      padding: 10px;
+    }
+
+    img {
+      display: none;
+      width: 100%;
+      max-height: 400px;
+      object-fit: contain;
+      border-radius: 12px;
+      margin-top: 20px;
+      border: 2px solid #ddd;
+    }
+
+    .result-box {
+      margin-top: 25px;
+      padding: 20px;
+      background: #f9f9f9;
+      border-radius: 12px;
+      font-size: 18px;
+      line-height: 1.6;
+    }
+
+    .warning {
+      color: #d84315;
+      font-weight: bold;
+    }
+
+    .success {
+      color: #2e7d32;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+
+    <!-- ÄNDRA TILL DITT NAMN OCH KLASS -->
+    <h1>Förnamn Efternamn, TE23</h1>
+
+    <div class="status-box" id="status">
+      Laddar modell...
+    </div>
+
+    <div class="upload-section">
+      <input type="file" id="imageInput" accept="image/*">
+    </div>
+
+    <img id="previewImage" />
+
+    <div class="result-box" id="result">
+      Ladda upp en blom-bild för att få en klassificering.
+    </div>
+
+  </div>
+
+  <script>
+    let model;
+
+    // Lista över blomklasser
+    // ÄNDRA så att den matchar träningsmodellen
+    const classNames = [
+      "Maskros",
+      "Ros",
+      "Tulpan",
+      "Solros",
+      "Lavendel"
+    ];
+
+    const statusBox = document.getElementById("status");
+    const imageInput = document.getElementById("imageInput");
+    const previewImage = document.getElementById("previewImage");
+    const resultBox = document.getElementById("result");
+
+    // LADDA MODELL
+    async function loadModel() {
+      try {
+        statusBox.textContent = "Laddar modell...";
+
+        // Byt till din GitHub raw-länk
+        model = await tf.loadLayersModel(
+          "tfjs_model/model.json"
+        );
+
+        statusBox.innerHTML =
+          "<span class='success'>Modellen är klar!</span>";
+
+      } catch (error) {
+        console.error(error);
+
+        statusBox.innerHTML =
+          "<span class='warning'>Fel vid laddning av modell.</span>";
+      }
+    }
+
+    loadModel();
+
+    // När användaren väljer en bild
+    imageInput.addEventListener("change", async (event) => {
+
+      const file = event.target.files[0];
+
+      if (!file) return;
+
+      // Visa bild
+      const imageURL = URL.createObjectURL(file);
+
+      previewImage.src = imageURL;
+      previewImage.style.display = "block";
+
+      // Vänta tills bilden laddats
+      previewImage.onload = async () => {
+        await predictImage(previewImage);
+      };
+    });
+
+    // Förbehandla bild
+    function preprocessImage(image) {
+
+      return tf.tidy(() => {
+
+        const tensor = tf.browser
+          .fromPixels(image)
+          .resizeNearestNeighbor([224, 224])
+          .toFloat()
+          .div(255)
+          .expandDims();
+
+        return tensor;
+      });
+    }
+
+    // Kör modellen
+    async function predictImage(image) {
+
+      if (!model) {
+        resultBox.innerHTML =
+          "<span class='warning'>Modellen är inte laddad ännu.</span>";
+        return;
+      }
+
+      try {
+
+        resultBox.innerHTML = "Analyserar bild...";
+
+        const tensor = preprocessImage(image);
+
+        const prediction = model.predict(tensor);
+
+        const data = await prediction.data();
+
+        // Hitta högsta sannolikhet
+        let highestProbability = 0;
+        let highestIndex = 0;
+
+        for (let i = 0; i < data.length; i++) {
+
+          if (data[i] > highestProbability) {
+            highestProbability = data[i];
+            highestIndex = i;
+          }
+        }
+
+        const flowerName = classNames[highestIndex];
+        const probabilityPercent =
+          (highestProbability * 100).toFixed(2);
+
+        // Osäkerhetslogik
+        let confidenceMessage = "";
+
+        if (highestProbability < 0.5) {
+
+          confidenceMessage =
+            "<div class='warning'>Mycket osäkert resultat</div>";
+
+        } else if (highestProbability < 0.75) {
+
+          confidenceMessage =
+            "<div class='warning'>Osäkert resultat</div>";
+        }
+
+        // Visa resultat
+        resultBox.innerHTML = `
+          <strong>Blomart:</strong> ${flowerName}<br>
+          <strong>Sannolikhet:</strong> ${probabilityPercent}%<br><br>
+          ${confidenceMessage}
+        `;
+
+        tensor.dispose();
+        prediction.dispose();
+
+      } catch (error) {
+
+        console.error(error);
+
+        resultBox.innerHTML =
+          "<span class='warning'>Fel vid klassificering av bild.</span>";
+      }
+    }
+  </script>
+
+</body>
+</html>
